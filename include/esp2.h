@@ -123,7 +123,6 @@
 struct SensorData {
     float roll;
     float pitch;
-    float distance;
 };
 
 SensorData receivedData;  // Variabel untuk menyimpan data yang diterima
@@ -138,9 +137,15 @@ void OnDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len) {
     Serial.print(receivedData.roll);
     Serial.print(" | Pitch: ");
     Serial.print(receivedData.pitch);
-    Serial.print(" | Distance: ");
-    Serial.print(receivedData.distance);
-    Serial.println(" cm");
+    Serial.println("");
+
+    if (receivedData.roll > 30) {
+        Serial.print("kanan");
+        Serial.println("");
+    } else if (receivedData.roll < -30) {
+        Serial.print("kiri");
+        Serial.println("");
+    }
 }
 
 void setup() {
@@ -164,5 +169,5 @@ void setup() {
 
 void loop() {
     // Tidak perlu melakukan apa-apa di loop utama
-    delay(1000);  // Tambahkan delay untuk debugging
+    delay(500);  // Tambahkan delay untuk debugging
 }

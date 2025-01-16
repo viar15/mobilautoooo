@@ -1,121 +1,117 @@
-// #include <esp_now.h>
-// #include <WiFi.h>
-
-// // Alamat MAC tujuan
-// uint8_t broadcastAddress[] = {0x10, 0x06, 0x1C, 0x86, 0xB9, 0xBC};
-
-// // Struktur data untuk dikirim
-// struct __attribute__((packed)) dataPacket {
-//   int state;
-// };
-
-// esp_now_peer_info_t peerInfo;
-
-// // Callback saat data dikirim
-// void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
-//   Serial.print("\r\nLast Packet Send Status:\t");
-//   Serial.println(status == ESP_NOW_SEND_SUCCESS ? "Delivery Success" : "Delivery Fail");
-// }
-
-// void setup() {
-//   Serial.begin(115200);
-
-//   // Set perangkat sebagai WiFi Station
-//   WiFi.mode(WIFI_STA);
-
-//   // Inisialisasi ESP-NOW
-//   if (esp_now_init() != ESP_OK) {
-//     Serial.println("Error initializing ESP-NOW");
-//     return;
-//   }
-
-//   // Registrasi callback untuk status pengiriman
-//   esp_now_register_send_cb(OnDataSent);
-
-//   // Set detail peer
-//   memcpy(peerInfo.peer_addr, broadcastAddress, 6);
-//   peerInfo.channel = 0; // Pastikan channel sesuai dengan penerima
-//   peerInfo.encrypt = false;
-
-//   // Tambahkan peer
-//   if (esp_now_add_peer(&peerInfo) != ESP_OK) {
-//     Serial.println("Failed to add peer");
-//     return;
-//   }
-// }
-
-// void loop() {
-//   dataPacket packet;
-
-//   // Pastikan pin yang akan dibaca telah diatur sebelumnya
-//   int pushdownPin = 26; // Ubah sesuai pin push button Anda
-//   pinMode(pushdownPin, INPUT);
-
-//   // Baca nilai dari pin push button
-//   packet.state = digitalRead(pushdownPin);
-
-//   // Kirim data menggunakan ESP-NOW
-//   esp_now_send(broadcastAddress, (uint8_t *)&packet, sizeof(packet));
-
-//   // Delay untuk mencegah pengiriman terlalu cepat
-//   delay(150);
-// }
-
-#include <esp_now.h>
 #include <WiFi.h>
+#include <Wire.h>
+#include <esp_now.h>
+#include <math.h>
 
-#define pushdown 26 // Ganti dengan pin tombol Anda
+// PIN dan Sensor
+#define pushdown 26  // Tombol
+#define trigPin 5    // Ultrasonik trigger
+#define echoPin 18   // Ultrasonik echo
 
-uint8_t broadcastAddress[] = {0x10, 0x06, 0x1C, 0x87, 0x07, 0xE4}; //esp2
+const int MPU_addr = 0x68;  // Alamat I2C MPU6050
 
-struct dataPacket {
-  char message[50];
+// Alamat MAC tujuan (sesuaikan dengan perangkat penerima)
+uint8_t broadcastAddress[] = {0x10, 0x06, 0x1C, 0x87, 0x07, 0xE4};
+
+// Struktur data untuk dikirim
+struct SensorData {
+    float roll;
+    float pitch;
 };
+
+SensorData sensorData;  // Variabel untuk menyimpan data sensor
 
 esp_now_peer_info_t peerInfo;
 
-
-// Callback saat data terkirim
+// Callback untuk mengonfirmasi pengiriman data
 void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
-  Serial.print("\r\nLast Packet Send Status: ");
-  Serial.println(status == ESP_NOW_SEND_SUCCESS ? "Delivery Success" : "Delivery Fail");
+    Serial.print("Last Packet Send Status: ");
+    Serial.println(status == ESP_NOW_SEND_SUCCESS ? "Delivery Success" : "Delivery Fail");
 }
 
 void setup() {
-  Serial.begin(115200);
+    // Inisialisasi Serial Monitor
+    Serial.begin(115200);
 
-  // Inisialisasi WiFi
-  WiFi.mode(WIFI_STA);
+    // Inisialisasi WiFi
+    WiFi.mode(WIFI_STA);
 
-  // Inisialisasi ESP-NOW
-  if (esp_now_init() != ESP_OK) {
-    Serial.println("Error initializing ESP-NOW");
-    return;
-  }
+    // Inisialisasi ESP-NOW
+    if (esp_now_init() != ESP_OK) {
+        Serial.println("Error initializing ESP-NOW");
+        return;
+    }
 
-  esp_now_register_send_cb(OnDataSent);
+    // Tambahkan callback untuk pengiriman data
+    esp_now_register_send_cb(OnDataSent);
 
-  // Tambahkan peer
-  memcpy(peerInfo.peer_addr, broadcastAddress, 6);
-  peerInfo.channel = 0;
-  peerInfo.encrypt = false;
-  if (esp_now_add_peer(&peerInfo) != ESP_OK) {
-    Serial.println("Failed to add peer");
-    return;
-  }
+    // Tambahkan perangkat peer
+    memcpy(peerInfo.peer_addr, broadcastAddress, 6);
+    peerInfo.channel = 0;
+    peerInfo.encrypt = false;
+    if (esp_now_add_peer(&peerInfo) != ESP_OK) {
+        Serial.println("Failed to add peer");
+        return;
+    }
 
-  // Atur pin tombol
-  pinMode(pushdown, INPUT_PULLUP);
+    // Inisialisasi tombol dan sensor
+    pinMode(pushdown, INPUT_PULLUP);
+    pinMode(trigPin, OUTPUT);
+    pinMode(echoPin, INPUT);
+
+    // Inisialisasi I2C untuk MPU6050
+    Wire.begin();
+    MPU_Init();
 }
 
 void loop() {
-    dataPacket packet;
+    // Variabel waktu untuk menghitung pitch, roll, dan yaw
+    static float previousTime = 0;
+    float currentTime = millis();
+    float elapsedTime = (currentTime - previousTime) / 1000.0;  // Konversi ke detik
+    previousTime = currentTime;
 
-  // Isi pesan
-  strcpy(packet.message, "Hello World");
+    // Membaca data akselerometer dari MPU6050
+    int16_t AcX, AcY, AcZ;
+    Wire.beginTransmission(MPU_addr);
+    Wire.write(0x3B);  // Alamat awal data akselerometer
+    Wire.endTransmission(false);
+    Wire.requestFrom(MPU_addr, 6, true);
+    AcX = Wire.read() << 8 | Wire.read();
+    AcY = Wire.read() << 8 | Wire.read();
+    AcZ = Wire.read() << 8 | Wire.read();
 
-  esp_now_send(broadcastAddress, (uint8_t *) &packet, sizeof(packet));
-  Serial.println("Message sent: Hello World");
+    // Konversi data akselerometer ke pitch dan roll
+    float accX = AcX / 16384.0;
+    float accY = AcY / 16384.0;
+    float accZ = AcZ / 16384.0;
 
-  delay(500); // Hindari pengiriman terlalu cepat
+    sensorData.pitch = atan(-accX / sqrt(accY * accY + accZ * accZ)) * 180.0 / M_PI;
+    sensorData.roll = atan(accY / sqrt(accX * accX + accZ * accZ)) * 180.0 / M_PI;
+
+    // Menampilkan data ke Serial Monitor
+    Serial.print("Roll: ");
+    Serial.print(sensorData.roll);
+    Serial.print(" | Pitch: ");
+    Serial.print(sensorData.pitch);
+    // Serial.print(" | Distance: ");
+    // Serial.print(sensorData.distance);
+    // Serial.println(" cm");
+
+    // Mengirim data melalui ESP-NOW
+    esp_err_t result = esp_now_send(broadcastAddress, (uint8_t *)&sensorData, sizeof(sensorData));
+    if (result == ESP_OK) {
+        Serial.println("Data berhasil dikirim");
+    } else {
+        Serial.println("Gagal mengirim data");
+    }
+
+    delay(1000);  // Kirim data setiap 1 detik
+}
+
+void MPU_Init() {
+    Wire.beginTransmission(MPU_addr);
+    Wire.write(0x6B);  // PWR_MGMT_1 register
+    Wire.write(0);     // Set ke 0 untuk mengaktifkan MPU6050
+    Wire.endTransmission(true);
 }
